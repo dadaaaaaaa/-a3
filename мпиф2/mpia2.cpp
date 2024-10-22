@@ -2,11 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <omp.h>
 
 #define VECTOR_SIZE 100000
 
 double calculate_norm(double* vector) {
     double sum = 0.0;
+
+#pragma omp parallel for reduction(+:sum)
     for (int i = 0; i < VECTOR_SIZE; i++) {
         sum += vector[i] * vector[i];
     }
@@ -32,7 +35,7 @@ int main(int argc, char** argv) {
         for (int i = 1; i < size; i++) {
             double norm;
             MPI_Recv(&norm, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            printf("Process %d: Norm = %f\n", i, norm);
+            printf("Процесс %d: Норма = %f\n", i, norm);
         }
     }
 
