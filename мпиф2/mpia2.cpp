@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <omp.h>
 
 #define VECTOR_SIZE 100000
 
@@ -28,13 +27,24 @@ int main(int argc, char** argv) {
             vector[i] = (double)(rank + 1);  // Пример заполнения
         }
         double norm = calculate_norm(vector);
+
+
         MPI_Send(&norm, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
         free(vector);
     }
     else {
+        double norm;
+        MPI_Request request;
+
         for (int i = 1; i < size; i++) {
-            double norm;
-            MPI_Recv(&norm, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Irecv(&norm, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &request);
+            int flag = 0;
+
+            while (flag == 0) {
+                // Проверяем завершение передачи сообщения
+                MPI_Test(&request, &flag, MPI_STATUS_IGNORE);
+                // Здесь можно добавить какую-то дополнительную логику
+            }
             printf("Процесс %d: Норма = %f\n", i, norm);
         }
     }
