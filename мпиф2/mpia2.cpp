@@ -1,57 +1,84 @@
-﻿#include <mpi.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <windows.h> // Для sleep
+﻿#include <iostream>
+#include <vector>
+#include <mpi.h>
+#include <omp.h>
+#include <cstdlib>
 
-#define VECTOR_SIZE 10
+// Константа для длины вектора
+const int N = 10;
 
-double calculate_norm(double* vector) {
+// Функция для последовательного вычисления скалярного произведения
+double sequential_scalar_product(const std::vector<double>& v) {
     double sum = 0.0;
-
-#pragma omp parallel for reduction(+:sum)
-    for (int i = 0; i < VECTOR_SIZE; i++) {
-        sum += vector[i] * vector[i];
+    for (double value : v) {
+        sum += value * value;
     }
-    return sqrt(sum);
+    return sum;
+}
+
+// Функция для параллельного вычисления скалярного произведения с использованием OpenMP
+double parallel_scalar_product(const std::vector<double>& v) {
+    double sum = 0.0;
+#pragma omp parallel reduction(+:sum) num_threads(threads_num)
+    {
+        double local_sum = 0.0;
+#pragma omp for
+        for (int i = 0; i < v.size(); ++i) {
+            local_sum += v[i] * v[i];
+        }
+        sum += local_sum;
+    }
+    return sum;
 }
 
 int main(int argc, char** argv) {
-    int rank, size;
     MPI_Init(&argc, &argv);
+
+    int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    if (rank != 0) {
-        double* vector = (double*)malloc(VECTOR_SIZE * sizeof(double));
-        for (int i = 0; i < VECTOR_SIZE; i++) {
-            vector[i] = (double)(rank + 1);  // Пример заполнения
+    // Генерация вектора только на процессе 0
+    std::vector<double> vec;
+    if (rank == 0) {
+        vec.resize(N);
+        for (int i = 0; i < N; ++i) {
+            vec[i] = (double)(rank+1);
         }
-        double norm = calculate_norm(vector);
+    }
 
-        // Если процесс 1, добавим задержку
-        if (rank == 1) {
-            Sleep(10000); // Задержка 10 секунд
-        }
+    // Определение количества элементов, которые будут обрабатываться каждым процессом
+    int elements_per_process = N / size;
+    int remainder = N % size; // Остаток от деления
 
-        MPI_Send(&norm, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-        free(vector);
+    // Определение количества элементов для текущего процесса
+    int local_size;
+    if (rank < remainder) {
+        local_size = elements_per_process + 1; // Процессам с рангом меньше remainder выделим на 1 элемент больше
     }
     else {
-        double norm;
-        MPI_Request request;
+        local_size = elements_per_process; // Остальные процессы получают равное количество
+    }
+    std::vector<double> local_vec(local_size);
 
-        for (int i = 1; i < size; i++) {
-            MPI_Irecv(&norm, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &request);
-            int flag = 0;
+    // Распределение вектора по процессам
+    MPI_Scatter(vec.data(), elements_per_process + (rank < remainder ? 1 : 0), MPI_DOUBLE,
+        local_vec.data(), local_size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-            while (flag == 0) {
-                // Проверяем завершение передачи сообщения
-                MPI_Test(&request, &flag, MPI_STATUS_IGNORE);
-                
-            }
-            printf("Proces %d: Norma = %f\n", i, norm);
-        }
+    // Последовательное вычисление на каждом процессе
+    double sequential_result = sequential_scalar_product(local_vec);
+
+    // Параллельное вычисление на каждом процессе
+    double parallel_result = parallel_scalar_product(local_vec);
+
+    // Сбор результатов на процессе 0
+    double total_result = 0.0;
+    MPI_Reduce(&parallel_result, &total_result, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    // Процесс 0 выводит результаты
+    if (rank == 0) {
+        std::cout << "Скалярное произведение (параллельно): " << total_result << std::endl;
+        std::cout << "Скалярное произведение (последовательно, на процессе 0): "<< sequential_scalar_product(vec) << std::endl;
     }
 
     MPI_Finalize();
