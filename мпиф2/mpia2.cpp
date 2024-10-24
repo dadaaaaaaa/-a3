@@ -5,7 +5,7 @@
 #include <cstdlib>
 
 // Константа для длины вектора
-const int N = 10;
+const int N = 100000;
 
 // Функция для последовательного вычисления скалярного произведения
 double sequential_scalar_product(const std::vector<double>& v) {
@@ -38,47 +38,48 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    // Генерация вектора только на процессе 0
     std::vector<double> vec;
+
+    // Процесс 0 инициализирует вектор и распределяет количество элементов
     if (rank == 0) {
         vec.resize(N);
         for (int i = 0; i < N; ++i) {
-            vec[i] = (double)(rank+1);
+            vec[i] = (double)(rank + 1); // Инициализация вектора значениями
         }
     }
 
-    // Определение количества элементов, которые будут обрабатываться каждым процессом
-    int elements_per_process = N / size;
-    int remainder = N % size; // Остаток от деления
+    // Массив, в котором будем хранить количество элементов для каждого процесса
+    std::vector<int> counts(size);
+    std::vector<int> displs(size);
 
-    // Определение количества элементов для текущего процесса
-    int local_size;
-    if (rank < remainder) {
-        local_size = elements_per_process + 1; // Процессам с рангом меньше remainder выделим на 1 элемент больше
+    // Неправильное распределение количества элементов (пример)
+    for (int i = 0; i < size; ++i) {
+        counts[i] = (i < N % size) ? N / size + 1 : N / size; // Ненормализованное распределение
+        displs[i] = i == 0 ? 0 : displs[i - 1] + counts[i - 1]; // Смещение
     }
-    else {
-        local_size = elements_per_process; // Остальные процессы получают равное количество
-    }
-    std::vector<double> local_vec(local_size);
 
-    // Распределение вектора по процессам
-    MPI_Scatter(vec.data(), elements_per_process + (rank < remainder ? 1 : 0), MPI_DOUBLE,
-        local_vec.data(), local_size, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    // Локальный вектор для каждого процесса
+    std::vector<double> local_vec(counts[rank]);
 
-    // Последовательное вычисление на каждом процессе
+    // Распределение данных
+    MPI_Scatterv(vec.data(), counts.data(), displs.data(), MPI_DOUBLE,
+        local_vec.data(), counts[rank], MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    // Выполнение последовательного вычисления на каждом процессе
     double sequential_result = sequential_scalar_product(local_vec);
 
-    // Параллельное вычисление на каждом процессе
+    // Выполнение параллельного вычисления на каждом процессе
     double parallel_result = parallel_scalar_product(local_vec);
 
     // Сбор результатов на процессе 0
     double total_result = 0.0;
+    double total_result2 = 0.0;
     MPI_Reduce(&parallel_result, &total_result, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-
+    MPI_Reduce(&sequential_result, &total_result2, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
     // Процесс 0 выводит результаты
     if (rank == 0) {
-        std::cout << "Скалярное произведение (параллельно): " << total_result << std::endl;
-        std::cout << "Скалярное произведение (последовательно, на процессе 0): "<< sequential_scalar_product(vec) << std::endl;
+        std::cout << "Paralel: " << total_result << std::endl;
+        std::cout << "Posled: " << total_result2 << std::endl;
     }
 
     MPI_Finalize();
